@@ -113,43 +113,21 @@ function AccountModal({ account, onSave, onClose }) {
         }
       : { name: '', type: 'cash', amount: '', currency: 'TWD', ticker: '', shares: '' }
   )
-  const [priceFetching, setPriceFetching] = useState(false)
-  const [priceError, setPriceError] = useState('')
 
   const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }))
   const isStockType = STOCK_TYPES.has(form.type)
-  const canFetchPrice = isStockType && form.ticker.trim() && form.shares
-
-  const handleFetchPrice = async () => {
-    if (!canFetchPrice || priceFetching) return
-    setPriceFetching(true)
-    setPriceError('')
-    try {
-      const ticker = form.ticker.toUpperCase().trim()
-      const prices = await fetchStockPrices([ticker])
-      const pi = prices[ticker]
-      if (pi) {
-        const newAmt = String(Math.round(pi.price * Number(form.shares) * 100) / 100)
-        const newCurrency = (pi.currency && pi.currency in RATES) ? pi.currency : form.currency
-        setForm(f => ({ ...f, amount: newAmt, currency: newCurrency }))
-      } else {
-        setPriceError('找不到此 Ticker 的報價，請確認代號是否正確')
-      }
-    } catch (e) {
-      setPriceError(e.message)
-    } finally {
-      setPriceFetching(false)
-    }
-  }
 
   const handleSave = () => {
     if (!form.name.trim()) return
-    const hasTickerShares = isStockType && form.ticker.trim() && form.shares
-    if (!hasTickerShares && !form.amount) return
+    if (isStockType) {
+      if (!form.ticker.trim() || !form.shares) return
+    } else {
+      if (!form.amount) return
+    }
     onSave({
       name: form.name.trim(),
       type: form.type,
-      amount: Number(form.amount) || 0,
+      amount: isStockType ? (Number(form.amount) || 0) : Number(form.amount),
       currency: form.currency,
       ticker: isStockType ? form.ticker.toUpperCase().trim() : '',
       shares: isStockType && form.shares ? Number(form.shares) : null,
@@ -187,34 +165,38 @@ function AccountModal({ account, onSave, onClose }) {
             </select>
           </div>
 
-          <div className="flex gap-3">
-            <div className="flex-1">
-              <label className="text-gray-400 text-xs block mb-1.5">金額（市值）</label>
-              <input
-                type="number"
-                value={form.amount}
-                onChange={set('amount')}
-                placeholder={canFetchPrice ? '點下方按鈕自動填入' : '0'}
-                min="0"
-                className={inputCls}
-              />
-            </div>
-            <div className="w-24">
-              <label className="text-gray-400 text-xs block mb-1.5">幣別</label>
-              <select value={form.currency} onChange={set('currency')} className={inputCls}>
-                {Object.keys(RATES).map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-          </div>
+          {!isStockType && (
+            <>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-gray-400 text-xs block mb-1.5">金額（市值）</label>
+                  <input
+                    type="number"
+                    value={form.amount}
+                    onChange={set('amount')}
+                    placeholder="0"
+                    min="0"
+                    className={inputCls}
+                  />
+                </div>
+                <div className="w-24">
+                  <label className="text-gray-400 text-xs block mb-1.5">幣別</label>
+                  <select value={form.currency} onChange={set('currency')} className={inputCls}>
+                    {Object.keys(RATES).map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
 
-          {form.currency !== 'TWD' && form.amount && (
-            <p className="text-gray-600 text-xs pl-1">
-              ≈ NT$ {fmt(toTWD(Number(form.amount), form.currency))} TWD
-            </p>
+              {form.currency !== 'TWD' && form.amount && (
+                <p className="text-gray-600 text-xs pl-1">
+                  ≈ NT$ {fmt(toTWD(Number(form.amount), form.currency))} TWD
+                </p>
+              )}
+            </>
           )}
 
           {isStockType && (
-            <div className="pt-3 space-y-3 border-t border-white/[0.06]">
+            <div className="space-y-3">
               <div className="flex gap-3">
                 <div className="flex-1">
                   <label className="text-gray-400 text-xs block mb-1.5">Ticker 代號</label>
@@ -238,25 +220,7 @@ function AccountModal({ account, onSave, onClose }) {
                   />
                 </div>
               </div>
-
-              {canFetchPrice && (
-                <button
-                  type="button"
-                  onClick={handleFetchPrice}
-                  disabled={priceFetching}
-                  className={`w-full py-2.5 rounded-xl text-sm font-medium transition-colors ${
-                    priceFetching
-                      ? 'bg-white/5 text-gray-500 cursor-not-allowed'
-                      : 'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30'
-                  }`}
-                >
-                  {priceFetching ? <><Spinner />取得中…</> : '↻ 取得現價並計算市值'}
-                </button>
-              )}
-
-              {priceError && (
-                <p className="text-red-400/80 text-xs">{priceError}</p>
-              )}
+              <p className="text-gray-600 text-xs">儲存後點右上角「更新現價」自動計算市值</p>
             </div>
           )}
         </div>
