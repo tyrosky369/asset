@@ -49,6 +49,7 @@ async function fetchStockPrices(tickers) {
   const endpoints = [
     base,
     `https://query2.finance.yahoo.com/v8/finance/quote?symbols=${sym}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(base)}`,
     `https://corsproxy.io/?url=${encodeURIComponent(base)}`,
   ]
 
@@ -56,7 +57,7 @@ async function fetchStockPrices(tickers) {
     try {
       const res = await fetch(url, {
         headers: { Accept: 'application/json' },
-        signal: AbortSignal.timeout(7000),
+        signal: AbortSignal.timeout(8000),
       })
       if (!res.ok) continue
       const data = await res.json()
@@ -64,10 +65,12 @@ async function fetchStockPrices(tickers) {
       if (!result?.length) continue
       const prices = {}
       result.forEach(q => {
-        prices[q.symbol] = {
-          price: q.regularMarketPrice,
-          changePct: q.regularMarketChangePercent ?? 0,
-          currency: q.currency,
+        if (q.regularMarketPrice != null) {
+          prices[q.symbol] = {
+            price: q.regularMarketPrice,
+            changePct: q.regularMarketChangePercent ?? 0,
+            currency: q.currency,
+          }
         }
       })
       if (Object.keys(prices).length > 0) return prices
@@ -110,16 +113,43 @@ function AccountModal({ account, onSave, onClose }) {
         }
       : { name: '', type: 'cash', amount: '', currency: 'TWD', ticker: '', shares: '' }
   )
+  const [priceFetching, setPriceFetching] = useState(false)
+  const [priceError, setPriceError] = useState('')
 
   const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }))
   const isStockType = STOCK_TYPES.has(form.type)
+  const canFetchPrice = isStockType && form.ticker.trim() && form.shares
+
+  const handleFetchPrice = async () => {
+    if (!canFetchPrice || priceFetching) return
+    setPriceFetching(true)
+    setPriceError('')
+    try {
+      const ticker = form.ticker.toUpperCase().trim()
+      const prices = await fetchStockPrices([ticker])
+      const pi = prices[ticker]
+      if (pi) {
+        const newAmt = String(Math.round(pi.price * Number(form.shares) * 100) / 100)
+        const newCurrency = (pi.currency && pi.currency in RATES) ? pi.currency : form.currency
+        setForm(f => ({ ...f, amount: newAmt, currency: newCurrency }))
+      } else {
+        setPriceError('找不到此 Ticker 的報價，請確認代號是否正確')
+      }
+    } catch (e) {
+      setPriceError(e.message)
+    } finally {
+      setPriceFetching(false)
+    }
+  }
 
   const handleSave = () => {
-    if (!form.name.trim() || !form.amount) return
+    if (!form.name.trim()) return
+    const hasTickerShares = isStockType && form.ticker.trim() && form.shares
+    if (!hasTickerShares && !form.amount) return
     onSave({
       name: form.name.trim(),
       type: form.type,
-      amount: Number(form.amount),
+      amount: Number(form.amount) || 0,
       currency: form.currency,
       ticker: isStockType ? form.ticker.toUpperCase().trim() : '',
       shares: isStockType && form.shares ? Number(form.shares) : null,
@@ -164,7 +194,7 @@ function AccountModal({ account, onSave, onClose }) {
                 type="number"
                 value={form.amount}
                 onChange={set('amount')}
-                placeholder="0"
+                placeholder={canFetchPrice ? '點下方按鈕自動填入' : '0'}
                 min="0"
                 className={inputCls}
               />
@@ -185,9 +215,6 @@ function AccountModal({ account, onSave, onClose }) {
 
           {isStockType && (
             <div className="pt-3 space-y-3 border-t border-white/[0.06]">
-              <p className="text-gray-500 text-xs leading-relaxed">
-                填入 Ticker 與股數後，可使用「更新現價」自動計算最新市值
-              </p>
               <div className="flex gap-3">
                 <div className="flex-1">
                   <label className="text-gray-400 text-xs block mb-1.5">Ticker 代號</label>
@@ -211,6 +238,25 @@ function AccountModal({ account, onSave, onClose }) {
                   />
                 </div>
               </div>
+
+              {canFetchPrice && (
+                <button
+                  type="button"
+                  onClick={handleFetchPrice}
+                  disabled={priceFetching}
+                  className={`w-full py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                    priceFetching
+                      ? 'bg-white/5 text-gray-500 cursor-not-allowed'
+                      : 'bg-blue-500/20 text-blue-400 border border-blue-500/30 hover:bg-blue-500/30'
+                  }`}
+                >
+                  {priceFetching ? <><Spinner />取得中…</> : '↻ 取得現價並計算市值'}
+                </button>
+              )}
+
+              {priceError && (
+                <p className="text-red-400/80 text-xs">{priceError}</p>
+              )}
             </div>
           )}
         </div>
@@ -607,7 +653,8 @@ export default function App() {
         const pi = prices[acc.ticker]
         if (!pi) return acc
         const newAmt = Math.round(pi.price * Number(acc.shares) * 100) / 100
-        return { ...acc, amount: newAmt }
+        const newCurrency = (pi.currency && pi.currency in RATES) ? pi.currency : acc.currency
+        return { ...acc, amount: newAmt, currency: newCurrency }
       }))
 
       const now = new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })
